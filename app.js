@@ -66,54 +66,57 @@ app.post('/process', upload.fields([
   { name: 'templateFile', maxCount: 1 }
 ]), (req, res) => {
   try {
-    // Verify that both files are provided.
     if (!req.files.sourceFile || !req.files.templateFile) {
       return res.status(400).send("Both files are required.");
     }
 
-    // Convert file buffers to XLSX workbooks.
+    // Read file buffers.
     const sourceBuffer = req.files.sourceFile[0].buffer;
     const templateBuffer = req.files.templateFile[0].buffer;
 
+    // Read the workbooks.
     const sourceWorkbook = XLSX.read(sourceBuffer, { type: 'buffer' });
-    const sourceSheetName = sourceWorkbook.SheetNames[0];
-    const sourceSheet = sourceWorkbook.Sheets[sourceSheetName];
-    // Convert sheet to an array-of-arrays.
-    let sourceData = XLSX.utils.sheet_to_json(sourceSheet, { header: 1 });
-
     const templateWorkbook = XLSX.read(templateBuffer, { type: 'buffer' });
-    const templateSheetName = templateWorkbook.SheetNames[0];
-    const templateSheet = templateWorkbook.Sheets[templateSheetName];
-    let templateData = XLSX.utils.sheet_to_json(templateSheet, { header: 1 });
 
-    // Ensure template has at least 63 rows; if not, pad with empty arrays.
+    // Get the first sheet names.
+    const sourceSheetName = sourceWorkbook.SheetNames[0];
+    const templateSheetName = templateWorkbook.SheetNames[0];
+
+    const sourceSheet = sourceWorkbook.Sheets[sourceSheetName];
+    const templateSheet = templateWorkbook.Sheets[templateSheetName];
+
+    // --- Optimize Data Extraction by Specifying Ranges ---
+    // For Section 1 (rows 2–9), we assume columns A:Z cover the data.
+    const sourceDataSec1 = XLSX.utils.sheet_to_json(sourceSheet, { 
+      header: 1, 
+      range: "A2:Z9" 
+    });
+    // For Section 2 (rows 13–25)
+    const sourceDataSec2 = XLSX.utils.sheet_to_json(sourceSheet, { 
+      header: 1, 
+      range: "A13:Z25" 
+    });
+
+    // Read the full template data.
+    let templateData = XLSX.utils.sheet_to_json(templateSheet, { header: 1 });
     while (templateData.length < 63) {
       templateData.push([]);
     }
 
     // ---------------- Extract Data from Source ----------------
 
-    // Section 1: rows 2 to 9 (array indexes 1 to 8), extract only column C (index 2)
-    let extractedSection1 = [];
-    for (let i = 1; i < 9; i++) {
-      const row = sourceData[i] || [];
-      extractedSection1.push(row[2] || "");
-    }
+    // Section 1: from sourceDataSec1, get only column C (index 2).
+    let extractedSection1 = sourceDataSec1.map(row => row[2] || "");
 
-    // Section 2: rows 13 to 25 (indexes 12 to 24), extract columns B, C, D (indexes 1, 2, 3)
-    let extractedSection2 = [];
-    for (let i = 12; i < 25; i++) {
-      const row = sourceData[i] || [];
-      extractedSection2.push({
-        B: row[1] || "",
-        C: row[2] || "",
-        D: row[3] || ""
-      });
-    }
+    // Section 2: from sourceDataSec2, get columns B, C, D (indexes 1,2,3).
+    let extractedSection2 = sourceDataSec2.map(row => ({
+      B: row[1] || "",
+      C: row[2] || "",
+      D: row[3] || ""
+    }));
 
-    // ---------------- Paste Extracted Data into Template ----------------
+    // ---------------- Paste Data into Template ----------------
 
-    // Utility function: pad an array to a given length.
     function padArray(arr, length) {
       while (arr.length < length) {
         arr.push("");
@@ -121,28 +124,24 @@ app.post('/process', upload.fields([
       return arr;
     }
 
-    // Paste Section 1 into template rows 40–47 (array indexes 39–46) into column D (index 3).
-    for (let j = 0; j < extractedSection1.length; j++) {
-      const destIndex = 39 + j;
-      if (templateData[destIndex] === undefined) {
-        templateData[destIndex] = [];
-      }
+    // Paste Section 1 into template rows 40–47 (indexes 39–46) into column D (index 3)
+    extractedSection1.forEach((value, idx) => {
+      const destIndex = 39 + idx;
+      if (!templateData[destIndex]) templateData[destIndex] = [];
       templateData[destIndex] = padArray(templateData[destIndex], 4);
-      templateData[destIndex][3] = extractedSection1[j];
-    }
+      templateData[destIndex][3] = value;
+    });
 
-    // Paste Section 2 into template rows 51–63 (array indexes 50–62) into columns C, D, E (indexes 2, 3, 4).
+    // Paste Section 2 into template rows 51–63 (indexes 50–62) into columns C, D, E (indexes 2,3,4)
     const maxSection2Rows = 13;
-    for (let k = 0; k < Math.min(extractedSection2.length, maxSection2Rows); k++) {
-      const destIndex = 50 + k;
-      if (templateData[destIndex] === undefined) {
-        templateData[destIndex] = [];
-      }
+    extractedSection2.slice(0, maxSection2Rows).forEach((obj, idx) => {
+      const destIndex = 50 + idx;
+      if (!templateData[destIndex]) templateData[destIndex] = [];
       templateData[destIndex] = padArray(templateData[destIndex], 5);
-      templateData[destIndex][2] = extractedSection2[k].B;
-      templateData[destIndex][3] = extractedSection2[k].C;
-      templateData[destIndex][4] = extractedSection2[k].D;
-    }
+      templateData[destIndex][2] = obj.B;
+      templateData[destIndex][3] = obj.C;
+      templateData[destIndex][4] = obj.D;
+    });
 
     // ---------------- Write Out New XLSX File ----------------
 
