@@ -2,6 +2,8 @@
 const express = require('express');
 const multer  = require('multer');
 const XLSX = require('xlsx');
+const serverless = require('serverless-http');
+
 const app = express();
 const port = 3000;
 
@@ -119,7 +121,7 @@ app.post('/process', upload.fields([
       return arr;
     }
 
-    // Paste Section 1 into template rows 40–47 (indexes 39–46) into column D (index 3).
+    // Paste Section 1 into template rows 40–47 (array indexes 39–46) into column D (index 3).
     for (let j = 0; j < extractedSection1.length; j++) {
       const destIndex = 39 + j;
       if (templateData[destIndex] === undefined) {
@@ -129,7 +131,7 @@ app.post('/process', upload.fields([
       templateData[destIndex][3] = extractedSection1[j];
     }
 
-    // Paste Section 2 into template rows 51–63 (indexes 50–62) into columns C, D, E (indexes 2, 3, 4).
+    // Paste Section 2 into template rows 51–63 (array indexes 50–62) into columns C, D, E (indexes 2, 3, 4).
     const maxSection2Rows = 13;
     for (let k = 0; k < Math.min(extractedSection2.length, maxSection2Rows); k++) {
       const destIndex = 50 + k;
@@ -162,6 +164,12 @@ app.post('/process', upload.fields([
   }
 });
 
-app.listen(port, () => {
-  console.log(`Server is running on http://localhost:${port}`);
-});
+// For local testing: start the server when not in production.
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(port, () => {
+    console.log(`Server is running on http://localhost:${port}`);
+  });
+}
+
+// Export the Express app wrapped with serverless-http for Vercel.
+module.exports = serverless(app);
